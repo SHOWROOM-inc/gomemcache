@@ -413,7 +413,7 @@ func BenchmarkOnItem(b *testing.B) {
 
 	addr := fakeServer.Addr()
 	c := New(addr.String())
-	if _, err := c.getConn(addr); err != nil {
+	if _, err := c.newPool(addr).getConn(); err != nil {
 		b.Fatal("failed to initialize connection to fake server")
 	}
 

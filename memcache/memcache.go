@@ -152,10 +152,18 @@ type Client struct {
 	// be set to a number higher than your peak parallel requests.
 	MaxIdleConns int
 
+	// MaxOpenConns specifies the maximum number of connections that will be maintained per address.
+	// If less than one, there is no limit on the number of open connections.
+	// Default is 0 (unlimited).
+	MaxOpenConns int
+
+	ConnMaxIdleTime time.Duration
+	ConnMaxLifeTime time.Duration
+
 	selector ServerSelector
 
-	lk       sync.Mutex
-	freeconn map[string][]*conn
+	lk    sync.Mutex
+	pools map[string]*pool
 }
 
 // Item is an item to be got or stored in a memcached server.
@@ -180,64 +188,6 @@ type Item struct {
 	// It's populated by get requests and then the same value is
 	// required for a CompareAndSwap request to succeed.
 	CasID uint64
-}
-
-// conn is a connection to a server.
-type conn struct {
-	nc   net.Conn
-	rw   *bufio.ReadWriter
-	addr net.Addr
-	c    *Client
-}
-
-// release returns this connection back to the client's free pool
-func (cn *conn) release() {
-	cn.c.putFreeConn(cn.addr, cn)
-}
-
-func (cn *conn) extendDeadline() {
-	cn.nc.SetDeadline(time.Now().Add(cn.c.netTimeout()))
-}
-
-// condRelease releases this connection if the error pointed to by err
-// is nil (not an error) or is only a protocol level error (e.g. a
-// cache miss).  The purpose is to not recycle TCP connections that
-// are bad.
-func (cn *conn) condRelease(err *error) {
-	if *err == nil || resumableError(*err) {
-		cn.release()
-	} else {
-		cn.nc.Close()
-	}
-}
-
-func (c *Client) putFreeConn(addr net.Addr, cn *conn) {
-	c.lk.Lock()
-	defer c.lk.Unlock()
-	if c.freeconn == nil {
-		c.freeconn = make(map[string][]*conn)
-	}
-	freelist := c.freeconn[addr.String()]
-	if len(freelist) >= c.maxIdleConns() {
-		cn.nc.Close()
-		return
-	}
-	c.freeconn[addr.String()] = append(freelist, cn)
-}
-
-func (c *Client) getFreeConn(addr net.Addr) (cn *conn, ok bool) {
-	c.lk.Lock()
-	defer c.lk.Unlock()
-	if c.freeconn == nil {
-		return nil, false
-	}
-	freelist, ok := c.freeconn[addr.String()]
-	if !ok || len(freelist) == 0 {
-		return nil, false
-	}
-	cn = freelist[len(freelist)-1]
-	c.freeconn[addr.String()] = freelist[:len(freelist)-1]
-	return cn, true
 }
 
 func (c *Client) netTimeout() time.Duration {
@@ -289,32 +239,16 @@ func (c *Client) dial(addr net.Addr) (net.Conn, error) {
 	return nil, err
 }
 
-func (c *Client) getConn(addr net.Addr) (*conn, error) {
-	cn, ok := c.getFreeConn(addr)
-	if ok {
-		cn.extendDeadline()
-		return cn, nil
-	}
-	nc, err := c.dial(addr)
-	if err != nil {
-		return nil, err
-	}
-	cn = &conn{
-		nc:   nc,
-		addr: addr,
-		rw:   bufio.NewReadWriter(bufio.NewReader(nc), bufio.NewWriter(nc)),
-		c:    c,
-	}
-	cn.extendDeadline()
-	return cn, nil
-}
-
 func (c *Client) onItem(item *Item, fn func(*Client, *bufio.ReadWriter, *Item) error) error {
 	addr, err := c.selector.PickServer(item.Key)
 	if err != nil {
 		return err
 	}
-	cn, err := c.getConn(addr)
+	p, ok := c.pools[addr.String()]
+	if !ok {
+		p = c.newPool(addr)
+	}
+	cn, err := p.getConn()
 	if err != nil {
 		return err
 	}
@@ -352,6 +286,18 @@ func (c *Client) Touch(key string, seconds int32) (err error) {
 	})
 }
 
+func (c *Client) newPool(addr net.Addr) *pool {
+	if c.pools == nil {
+		c.pools = make(map[string]*pool)
+	}
+	if p, ok := c.pools[addr.String()]; ok {
+		return p
+	}
+
+	c.pools[addr.String()] = newPool(addr, c)
+	return c.pools[addr.String()]
+}
+
 func (c *Client) withKeyAddr(key string, fn func(net.Addr) error) (err error) {
 	if !legalKey(key) {
 		return ErrMalformedKey
@@ -364,7 +310,11 @@ func (c *Client) withKeyAddr(key string, fn func(net.Addr) error) (err error) {
 }
 
 func (c *Client) withAddrRw(addr net.Addr, fn func(*bufio.ReadWriter) error) (err error) {
-	cn, err := c.getConn(addr)
+	p, ok := c.pools[addr.String()]
+	if !ok {
+		p = c.newPool(addr)
+	}
+	cn, err := p.getConn()
 	if err != nil {
 		return err
 	}
@@ -764,13 +714,12 @@ func (c *Client) Close() error {
 	c.lk.Lock()
 	defer c.lk.Unlock()
 	var ret error
-	for _, conns := range c.freeconn {
-		for _, c := range conns {
-			if err := c.nc.Close(); err != nil && ret == nil {
-				ret = err
-			}
+	for _, p := range c.pools {
+		for cn := range p.freeconns {
+			cn.close()
 		}
+		p.freeconns = nil
 	}
-	c.freeconn = nil
+	c.pools = make(map[string]*pool)
 	return ret
 }
