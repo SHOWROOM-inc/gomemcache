@@ -14,6 +14,7 @@ func newPool(addr net.Addr, c *Client) *pool {
 		freeconnsNum: 0,
 		openconnsNum: 0,
 		c:            c,
+		nowFunc:      time.Now,
 	}
 }
 
@@ -24,6 +25,7 @@ type pool struct {
 	freeconnsNum int
 	openconnsNum int
 	c            *Client
+	nowFunc      func() time.Time
 }
 
 func (p *pool) dequeueFreeConn() (*conn, bool) {
@@ -38,12 +40,14 @@ func (p *pool) dequeueFreeConn() (*conn, bool) {
 	cn := <-p.freeconns
 	p.freeconnsNum--
 
-	if cn.isExpired(time.Now()) {
+	now := p.nowFunc()
+
+	if cn.isExpired(now) {
 		p.closeConn(cn)
 		return p.dequeueFreeConn()
 	}
 
-	cn.lastUsedAt = time.Now()
+	cn.lastUsedAt = now
 	return cn, true
 }
 
@@ -52,13 +56,14 @@ func (p *pool) enqueueNewFreeConn() error {
 	if err != nil {
 		return err
 	}
+	now := p.nowFunc()
 	newConn := &conn{
 		nc:         nc,
 		rw:         bufio.NewReadWriter(bufio.NewReader(nc), bufio.NewWriter(nc)),
 		addr:       p.addr,
 		p:          p,
-		lastUsedAt: time.Now(),
-		createdAt:  time.Now(),
+		lastUsedAt: now,
+		createdAt:  now,
 	}
 
 	p.freeconns <- newConn
