@@ -244,10 +244,8 @@ func (c *Client) onItem(item *Item, fn func(*Client, *bufio.ReadWriter, *Item) e
 	if err != nil {
 		return err
 	}
-	p, ok := c.pools[addr.String()]
-	if !ok {
-		p = c.newPool(addr)
-	}
+
+	p := c.getOrNewPool(addr)
 	cn, err := p.getConn()
 	if err != nil {
 		return err
@@ -286,7 +284,7 @@ func (c *Client) Touch(key string, seconds int32) (err error) {
 	})
 }
 
-func (c *Client) newPool(addr net.Addr) *pool {
+func (c *Client) getOrNewPool(addr net.Addr) *pool {
 	if c.pools == nil {
 		c.pools = make(map[string]*pool)
 	}
@@ -310,10 +308,7 @@ func (c *Client) withKeyAddr(key string, fn func(net.Addr) error) (err error) {
 }
 
 func (c *Client) withAddrRw(addr net.Addr, fn func(*bufio.ReadWriter) error) (err error) {
-	p, ok := c.pools[addr.String()]
-	if !ok {
-		p = c.newPool(addr)
-	}
+	p := c.getOrNewPool(addr)
 	cn, err := p.getConn()
 	if err != nil {
 		return err

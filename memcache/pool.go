@@ -91,8 +91,7 @@ func (p *pool) getConn() (*conn, error) {
 	}
 
 	// return latest freeconn or wait until to become free
-	cn = <-p.freeconns
-	return cn, nil
+	return <-p.freeconns, nil
 }
 
 func (p *pool) isNewConnOk() bool {
