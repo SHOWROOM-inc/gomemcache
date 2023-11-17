@@ -91,7 +91,8 @@ func (p *pool) getConn() (*conn, error) {
 	}
 
 	// return latest freeconn or wait until to become free
-	return <-p.freeconns, nil
+	cn = <-p.freeconns
+	return cn, nil
 }
 
 func (p *pool) isNewConnOk() bool {
@@ -102,13 +103,12 @@ func (p *pool) isNewConnOk() bool {
 }
 
 func (p *pool) putFreeConn(cn *conn) {
-	p.lk.Lock()
-	defer p.lk.Unlock()
-	if p.freeconns == nil {
-		p.freeconns = make(chan *conn)
-	}
-	p.freeconns <- cn
-	p.freeconnsNum++
+	go func() {
+		p.lk.Lock()
+		defer p.lk.Unlock()
+		p.freeconns <- cn
+		p.freeconnsNum++
+	}()
 }
 
 func (p *pool) closeConn(cn *conn) {
