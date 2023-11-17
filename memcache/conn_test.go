@@ -57,4 +57,18 @@ func TestConn_isExpired(t *testing.T) {
 			t.Fatalf("should be false")
 		}
 	})
+	t.Run("not specified", func(t *testing.T) {
+		now := time.Date(2023, 11, 17, 1, 0, 11, 0, time.UTC)
+
+		cn := &conn{
+			createdAt:  time.Date(1990, 11, 17, 1, 0, 2, 0, time.UTC),
+			lastUsedAt: time.Date(1990, 11, 17, 1, 0, 5, 0, time.UTC),
+			c:          &Client{},
+		}
+
+		actual := cn.isExpired(now)
+		if actual == true {
+			t.Fatalf("should be false")
+		}
+	})
 }
