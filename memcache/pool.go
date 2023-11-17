@@ -66,11 +66,13 @@ func (p *pool) enqueueNewFreeConn() error {
 		createdAt:  now,
 	}
 
-	p.freeconns <- newConn
-	p.lk.Lock()
-	defer p.lk.Unlock()
-	p.freeconnsNum++
-	p.openconnsNum++
+	go func() {
+		p.freeconns <- newConn
+		p.lk.Lock()
+		defer p.lk.Unlock()
+		p.freeconnsNum++
+		p.openconnsNum++
+	}()
 
 	return nil
 }

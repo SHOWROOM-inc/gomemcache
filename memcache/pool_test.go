@@ -1,6 +1,8 @@
 package memcache
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestPool_isNewConnOk(t *testing.T) {
 	t.Run("MaxOpenConn is zero", func(t *testing.T) {
