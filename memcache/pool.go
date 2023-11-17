@@ -93,7 +93,7 @@ func (p *pool) getConn() (*conn, error) {
 }
 
 func (p *pool) isNewConnOk() bool {
-	if p.openconnsNum <= 0 {
+	if p.c.MaxOpenConns <= 0 {
 		return true
 	}
 	return p.openconnsNum < p.c.MaxOpenConns
