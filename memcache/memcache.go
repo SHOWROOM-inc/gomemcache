@@ -718,3 +718,18 @@ func (c *Client) Close() error {
 	c.pools = make(map[string]*pool)
 	return ret
 }
+
+func (c *Client) Stats() []*Stats {
+	stats := make([]*Stats, 0)
+	for ad, p := range c.pools {
+		stat := &Stats{
+			Address:            ad,
+			MaxIdleConnections: c.maxIdleConns(),
+			MaxOpenConnections: c.MaxOpenConns,
+			OpenConnsNum:       p.openconnsNum,
+			IdleConnsNum:       p.freeconnsNum,
+		}
+		stats = append(stats, stat)
+	}
+	return stats
+}
