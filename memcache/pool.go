@@ -28,29 +28,6 @@ type pool struct {
 	nowFunc      func() time.Time
 }
 
-func (p *pool) dequeueFreeConn() (*conn, bool) {
-	p.lk.Lock()
-	defer p.lk.Unlock()
-	if p.freeconns == nil {
-		return nil, false
-	}
-	if p.freeconnsNum == 0 {
-		return nil, false
-	}
-	cn := <-p.freeconns
-	p.freeconnsNum--
-
-	now := p.nowFunc()
-
-	if cn.isExpired(now) {
-		p.closeConn(cn)
-		return p.dequeueFreeConn()
-	}
-
-	cn.lastUsedAt = now
-	return cn, true
-}
-
 func (p *pool) enqueueNewFreeConn() error {
 	nc, err := p.c.dial(p.addr)
 	if err != nil {
@@ -62,36 +39,41 @@ func (p *pool) enqueueNewFreeConn() error {
 		rw:         bufio.NewReadWriter(bufio.NewReader(nc), bufio.NewWriter(nc)),
 		addr:       p.addr,
 		p:          p,
+		c:          p.c,
 		lastUsedAt: now,
 		createdAt:  now,
 	}
 
 	go func() {
-		p.freeconns <- newConn
-		p.lk.Lock()
-		defer p.lk.Unlock()
 		p.freeconnsNum++
 		p.openconnsNum++
+		p.freeconns <- newConn
 	}()
 
 	return nil
 }
 
 func (p *pool) getConn() (*conn, error) {
-	cn, ok := p.dequeueFreeConn()
-	if ok {
-		return cn, nil
-	}
+	p.lk.Lock()
+	defer p.lk.Unlock()
 
-	// create new connections and enqueue freeconns if available
-	if p.isNewConnOk() {
+	if p.freeconnsNum == 0 && p.isNewConnOk() {
 		if err := p.enqueueNewFreeConn(); err != nil {
 			return nil, err
 		}
 	}
 
-	// return latest freeconn or wait until to become free
-	return <-p.freeconns, nil
+	cn := <-p.freeconns
+	p.freeconnsNum--
+	now := p.nowFunc()
+
+	if cn.isExpired(now) {
+		p.closeConn(cn)
+		return p.getConn()
+	}
+
+	cn.lastUsedAt = now
+	return cn, nil
 }
 
 func (p *pool) isNewConnOk() bool {
@@ -103,10 +85,8 @@ func (p *pool) isNewConnOk() bool {
 
 func (p *pool) putFreeConn(cn *conn) {
 	go func() {
-		p.lk.Lock()
-		defer p.lk.Unlock()
-		p.freeconns <- cn
 		p.freeconnsNum++
+		p.freeconns <- cn
 	}()
 }
 

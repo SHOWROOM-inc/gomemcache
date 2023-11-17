@@ -31,10 +31,10 @@ func (cn *conn) extendDeadline() {
 }
 
 func (cn *conn) isExpired(now time.Time) bool {
-	if cn.createdAt.Add(cn.c.ConnMaxLifeTime).Before(now) {
+	if cn.c.ConnMaxLifeTime > 0 && cn.createdAt.Add(cn.c.ConnMaxLifeTime).Before(now) {
 		return true
 	}
-	if cn.lastUsedAt.Add(cn.c.ConnMaxIdleTime).Before(now) {
+	if cn.c.ConnMaxIdleTime > 0 && cn.lastUsedAt.Add(cn.c.ConnMaxIdleTime).Before(now) {
 		return true
 	}
 	return false
