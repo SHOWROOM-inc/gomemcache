@@ -1,7 +1,6 @@
 package memcache
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
 )
@@ -20,7 +19,9 @@ func TestConn_isExpired(t *testing.T) {
 		}
 
 		actual := cn.isExpired(now)
-		assert.True(t, actual)
+		if actual == false {
+			t.Fatalf("should be true")
+		}
 	})
 	t.Run("expired by lastUsedAt", func(t *testing.T) {
 		now := time.Date(2023, 11, 17, 1, 0, 11, 0, time.UTC)
@@ -35,7 +36,9 @@ func TestConn_isExpired(t *testing.T) {
 		}
 
 		actual := cn.isExpired(now)
-		assert.True(t, actual)
+		if actual == false {
+			t.Fatalf("should be true")
+		}
 	})
 	t.Run("not expired", func(t *testing.T) {
 		now := time.Date(2023, 11, 17, 1, 0, 11, 0, time.UTC)
@@ -50,6 +53,8 @@ func TestConn_isExpired(t *testing.T) {
 		}
 
 		actual := cn.isExpired(now)
-		assert.False(t, actual)
+		if actual == true {
+			t.Fatalf("should be false")
+		}
 	})
 }
