@@ -3,6 +3,7 @@ package memcache
 import (
 	"bufio"
 	"net"
+	"sync"
 	"time"
 )
 
@@ -18,6 +19,7 @@ func newPool(addr net.Addr, c *Client) *pool {
 }
 
 type pool struct {
+	lk           sync.Mutex
 	addr         net.Addr
 	freeconns    chan *conn
 	freeconnsNum int
@@ -43,8 +45,10 @@ func (p *pool) enqueueNewFreeConn() error {
 	}
 
 	go func() {
+		p.lk.Lock()
 		p.freeconnsNum++
 		p.openconnsNum++
+		p.lk.Unlock()
 		p.freeconns <- newConn
 	}()
 
@@ -52,14 +56,17 @@ func (p *pool) enqueueNewFreeConn() error {
 }
 
 func (p *pool) getConn() (*conn, error) {
-	if p.freeconnsNum == 0 && p.isNewConnOk() {
+	if p.freeconnsNum <= 0 && p.isNewConnOk() {
 		if err := p.enqueueNewFreeConn(); err != nil {
 			return nil, err
 		}
 	}
 
 	cn := <-p.freeconns
+	p.lk.Lock()
 	p.freeconnsNum--
+	p.lk.Unlock()
+
 	now := p.nowFunc()
 
 	if cn.isExpired(now) {
@@ -81,7 +88,9 @@ func (p *pool) isNewConnOk() bool {
 func (p *pool) putFreeConn(cn *conn) {
 	if p.freeconnsNum < p.c.maxIdleConns() {
 		go func() {
+			p.lk.Lock()
 			p.freeconnsNum++
+			p.lk.Unlock()
 			p.freeconns <- cn
 		}()
 	} else {
@@ -91,5 +100,7 @@ func (p *pool) putFreeConn(cn *conn) {
 
 func (p *pool) closeConn(cn *conn) {
 	_ = cn.nc.Close()
+	p.lk.Lock()
 	p.openconnsNum--
+	p.lk.Unlock()
 }
